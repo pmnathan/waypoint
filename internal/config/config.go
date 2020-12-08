@@ -9,6 +9,7 @@ import (
 	"github.com/hashicorp/hcl/v2/hclsimple"
 
 	"github.com/hashicorp/waypoint/internal/pkg/defaults"
+	pb "github.com/hashicorp/waypoint/internal/server/gen"
 )
 
 type Config struct {
@@ -24,6 +25,7 @@ type hclConfig struct {
 	Runner  *Runner           `hcl:"runner,block" default:"{}"`
 	Labels  map[string]string `hcl:"labels,optional"`
 	Plugin  []*Plugin         `hcl:"plugin,block"`
+	Config  *genericConfig    `hcl:"config,block"`
 	Apps    []*hclApp         `hcl:"app,block"`
 	Body    hcl.Body          `hcl:",body"`
 }
@@ -84,11 +86,21 @@ func Load(path string, pwd string) (*Config, error) {
 
 	// Decode
 	var cfg hclConfig
-	if err := hclsimple.DecodeFile(path, ctx, &cfg); err != nil {
+	if err := hclsimple.DecodeFile(path, finalizeContext(ctx), &cfg); err != nil {
 		return nil, err
 	}
 	if err := defaults.Set(&cfg); err != nil {
 		return nil, err
+	}
+
+	// Set some values
+	if cfg.Config != nil {
+		cfg.Config.ctx = ctx
+		cfg.Config.scopeFunc = func(cv *pb.ConfigVar) {
+			cv.Scope = &pb.ConfigVar_Project{
+				Project: &pb.Ref_Project{Project: cfg.Project},
+			}
+		}
 	}
 
 	return &Config{

@@ -3,9 +3,11 @@ package docker
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"fmt"
 	"os"
-	"path"
+	"path/filepath"
+	"strings"
 
 	"github.com/docker/cli/cli/command/image/build"
 	"github.com/docker/docker/api/types"
@@ -16,6 +18,7 @@ import (
 	"github.com/hashicorp/waypoint-plugin-sdk/component"
 	"github.com/hashicorp/waypoint-plugin-sdk/docs"
 	"github.com/hashicorp/waypoint-plugin-sdk/terminal"
+	"github.com/oklog/ulid/v2"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -47,7 +50,10 @@ type BuilderConfig struct {
 }
 
 func (b *Builder) Documentation() (*docs.Documentation, error) {
-	doc, err := docs.New(docs.FromConfig(&BuilderConfig{}))
+	doc, err := docs.New(
+		docs.FromConfig(&BuilderConfig{}),
+		docs.FromFunc(b.BuildFunc()),
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -63,7 +69,6 @@ build {
 }
 `)
 
-	doc.Input("component.Source")
 	doc.Output("docker.Image")
 
 	doc.SetField(
@@ -125,8 +130,29 @@ func (b *Builder) Build(
 	cli.NegotiateAPIVersion(ctx)
 
 	dockerfile := b.config.Dockerfile
-	if dockerfile != "" {
-		dockerfile = path.Join(src.Path, dockerfile)
+	if dockerfile == "" {
+		dockerfile = "Dockerfile"
+	}
+	if !filepath.IsAbs(dockerfile) {
+		dockerfile = filepath.Join(src.Path, dockerfile)
+	}
+
+	// If the dockerfile is outside of our build context, then we copy it
+	// into our build context.
+	relDockerfile, err := filepath.Rel(src.Path, dockerfile)
+	if err != nil || strings.HasPrefix(relDockerfile, "..") {
+		id, err := ulid.New(ulid.Now(), rand.Reader)
+		if err != nil {
+			return nil, err
+		}
+
+		newPath := filepath.Join(src.Path, fmt.Sprintf("Dockerfile-%s", id.String()))
+		if err := copyFile(dockerfile, newPath); err != nil {
+			return nil, err
+		}
+		defer os.Remove(newPath)
+
+		dockerfile = newPath
 	}
 
 	contextDir, relDockerfile, err := build.GetContextFromLocalDir(src.Path, dockerfile)

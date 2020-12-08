@@ -29,8 +29,21 @@ export default [
   {
     category: 'waypoint-hcl',
     content: [
+      {
+        category: 'variables',
+        content: ['artifact', 'deploy', 'entrypoint', 'path'],
+      },
+      {
+        category: 'functions',
+        content: ['all', 'template'],
+      },
+      {
+        category: 'syntax',
+        content: ['expressions', 'json'],
+      },
       'app',
       'build',
+      'config',
       'deploy',
       'hook',
       'plugin',
@@ -53,7 +66,10 @@ export default [
   'url',
   'logs',
   'exec',
-  'app-config',
+  {
+    category: 'app-config',
+    content: ['dynamic'],
+  },
   'workspaces',
   'plugins',
   '-----------',

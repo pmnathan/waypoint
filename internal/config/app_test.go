@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	pb "github.com/hashicorp/waypoint/internal/server/gen"
 )
 
 func TestConfigApp_compare(t *testing.T) {
@@ -77,6 +79,26 @@ func TestConfigApp_compare(t *testing.T) {
 		},
 
 		{
+			"build_use.hcl",
+			"test",
+			func(t *testing.T, c *App) {
+				b, err := c.Build(nil)
+				require.NoError(t, err)
+
+				op := b.Operation()
+				require.NotNil(t, op)
+
+				var p testPluginBuildConfig
+				diag := op.Configure(&p, nil)
+				if diag.HasErrors() {
+					t.Fatal(diag.Error())
+				}
+
+				require.NotEmpty(t, p.config.Foo)
+			},
+		},
+
+		{
 			"build_registry.hcl",
 			"test",
 			func(t *testing.T, c *App) {
@@ -84,6 +106,56 @@ func TestConfigApp_compare(t *testing.T) {
 				require.NoError(t, err)
 				require.NotNil(t, r)
 				require.Equal(t, "docker", r.Use.Type)
+			},
+		},
+
+		{
+			"config_env.hcl",
+			"test",
+			func(t *testing.T, c *App) {
+				require := require.New(t)
+
+				vars, err := c.Config.ConfigVars()
+				require.NoError(err)
+
+				// test the static value
+				require.Len(vars, 1)
+				static, ok := vars[0].Value.(*pb.ConfigVar_Static)
+				require.True(ok)
+				require.Equal("hello", static.Static)
+			},
+		},
+
+		{
+			"config_env_dynamic.hcl",
+			"test",
+			func(t *testing.T, c *App) {
+				require := require.New(t)
+
+				vars, err := c.Config.ConfigVars()
+				require.NoError(err)
+
+				// test the static value
+				require.Len(vars, 1)
+				val, ok := vars[0].Value.(*pb.ConfigVar_Dynamic)
+				require.True(ok)
+				require.Equal("DATABASE_URL", vars[0].Name)
+				require.Equal("vault", val.Dynamic.From)
+				require.Equal(map[string]string{
+					"path": "foo/",
+				}, val.Dynamic.Config)
+			},
+		},
+
+		{
+			"config_env_merge.hcl",
+			"test",
+			func(t *testing.T, c *App) {
+				require := require.New(t)
+
+				vars, err := c.ConfigVars()
+				require.NoError(err)
+				require.Len(vars, 2)
 			},
 		},
 	}
@@ -149,4 +221,16 @@ func TestAppValidate(t *testing.T) {
 			require.Contains(err.Error(), tt.Err)
 		})
 	}
+}
+
+// testPluginBuildConfig implements component.Configurable to test that we
+// decode HCL properly.
+type testPluginBuildConfig struct {
+	config struct {
+		Foo string `hcl:"foo,attr"`
+	}
+}
+
+func (p *testPluginBuildConfig) Config() (interface{}, error) {
+	return &p.config, nil
 }

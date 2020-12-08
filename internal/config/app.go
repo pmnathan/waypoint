@@ -6,6 +6,8 @@ import (
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/gohcl"
 	"github.com/mitchellh/copystructure"
+
+	pb "github.com/hashicorp/waypoint/internal/server/gen"
 )
 
 // App represents a single application.
@@ -14,6 +16,7 @@ type App struct {
 	Path   string            `hcl:"path,optional"`
 	Labels map[string]string `hcl:"labels,optional"`
 	URL    *AppURL           `hcl:"url,block" default:"{}"`
+	Config *genericConfig    `hcl:"config,block"`
 
 	BuildRaw   *hclBuild `hcl:"build,block"`
 	DeployRaw  *hclStage `hcl:"deploy,block"`
@@ -86,15 +89,49 @@ func (c *Config) App(n string, ctx *hcl.EvalContext) (*App, error) {
 
 	// Full decode
 	var app App
-	if diag := gohcl.DecodeBody(rawApp.Body, ctx, &app); diag.HasErrors() {
+	if diag := gohcl.DecodeBody(rawApp.Body, finalizeContext(ctx), &app); diag.HasErrors() {
 		return nil, diag
 	}
 	app.Name = rawApp.Name
 	app.Path = appPath
 	app.ctx = ctx
 	app.config = c
+	if app.Config != nil {
+		app.Config.ctx = ctx
+		app.Config.scopeFunc = func(cv *pb.ConfigVar) {
+			cv.Scope = &pb.ConfigVar_Application{
+				Application: app.Ref(),
+			}
+		}
+	}
 
 	return &app, nil
+}
+
+// Ref returns the ref for this app.
+func (c *App) Ref() *pb.Ref_Application {
+	return &pb.Ref_Application{
+		Application: c.Name,
+		Project:     c.config.Project,
+	}
+}
+
+// ConfigVars returns the configuration variables for the app, including
+// merging the configuration variables from the project level.
+//
+// For access to only the app-level config vars, use the Config attribute directly.
+func (c *App) ConfigVars() ([]*pb.ConfigVar, error) {
+	vars, err := c.config.Config.ConfigVars()
+	if err != nil {
+		return nil, err
+	}
+
+	appVars, err := c.Config.ConfigVars()
+	if err != nil {
+		return nil, err
+	}
+
+	return append(vars, appVars...), nil
 }
 
 // Build loads the Build section of the configuration.
@@ -102,9 +139,10 @@ func (c *App) Build(ctx *hcl.EvalContext) (*Build, error) {
 	ctx = appendContext(c.ctx, ctx)
 
 	var b Build
-	if diag := gohcl.DecodeBody(c.BuildRaw.Body, ctx, &b); diag.HasErrors() {
+	if diag := gohcl.DecodeBody(c.BuildRaw.Body, finalizeContext(ctx), &b); diag.HasErrors() {
 		return nil, diag
 	}
+	b.ctx = ctx
 
 	return &b, nil
 }
@@ -118,9 +156,10 @@ func (c *App) Registry(ctx *hcl.EvalContext) (*Registry, error) {
 
 	var b Registry
 	ctx = appendContext(c.ctx, ctx)
-	if diag := gohcl.DecodeBody(c.BuildRaw.Registry.Body, ctx, &b); diag.HasErrors() {
+	if diag := gohcl.DecodeBody(c.BuildRaw.Registry.Body, finalizeContext(ctx), &b); diag.HasErrors() {
 		return nil, diag
 	}
+	b.ctx = ctx
 
 	return &b, nil
 }
@@ -130,9 +169,10 @@ func (c *App) Deploy(ctx *hcl.EvalContext) (*Deploy, error) {
 	ctx = appendContext(c.ctx, ctx)
 
 	var b Deploy
-	if diag := gohcl.DecodeBody(c.DeployRaw.Body, ctx, &b); diag.HasErrors() {
+	if diag := gohcl.DecodeBody(c.DeployRaw.Body, finalizeContext(ctx), &b); diag.HasErrors() {
 		return nil, diag
 	}
+	b.ctx = ctx
 
 	return &b, nil
 }
@@ -145,9 +185,46 @@ func (c *App) Release(ctx *hcl.EvalContext) (*Release, error) {
 
 	var b Release
 	ctx = appendContext(c.ctx, ctx)
-	if diag := gohcl.DecodeBody(c.ReleaseRaw.Body, ctx, &b); diag.HasErrors() {
+	if diag := gohcl.DecodeBody(c.ReleaseRaw.Body, finalizeContext(ctx), &b); diag.HasErrors() {
 		return nil, diag
 	}
+	b.ctx = ctx
 
 	return &b, nil
+}
+
+// BuildUse returns the plugin "use" value.
+func (c *App) BuildUse() string {
+	if c.BuildRaw == nil {
+		return ""
+	}
+
+	return c.BuildRaw.Use.Type
+}
+
+// RegistryUse returns the plugin "use" value.
+func (c *App) RegistryUse() string {
+	if c.BuildRaw == nil || c.BuildRaw.Registry == nil {
+		return ""
+	}
+
+	return c.BuildRaw.Registry.Use.Type
+}
+
+// DeployUse returns the plugin "use" value.
+func (c *App) DeployUse() string {
+	if c.DeployRaw == nil {
+		return ""
+	}
+
+	return c.DeployRaw.Use.Type
+}
+
+// ReleaseUse returns the plugin "use" value.
+func (c *App) ReleaseUse() string {
+	if c.ReleaseRaw == nil {
+		return ""
+	}
+
+	return c.ReleaseRaw.Use.Type
 }

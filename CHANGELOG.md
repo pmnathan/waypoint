@@ -2,10 +2,58 @@
 
 FEATURES:
 
+* **Application config syncing with Kubernetes (ConfigMaps), Vault, Consul, and AWS SSM**;
+Automatically sync environment variable values with remote sources and restart your
+application when those values change. [GH-810]
+* **Access to Artifact, Deploy Metadata**: `registry` and `deploy` configuration can use 
+`artifact.*` variable syntax to access metadata from the results of those stages. 
+The `release` configuration can use `artifact.*` and `deploy.*` to access metadata.
+For example: `image = artifact.image` for Docker-based builds. [GH-757]
+* **`template` Functions**: `templatefile`, `templatedir`, and `templatestring` functions
+allow you to template files, directories, and strings with the variables and functions
+available to your Waypoint configuration. 
+* **`path` Variables**: you can now use `path.project`, `path.app`, and `path.pwd` as
+variables in your Waypoint file to specify paths as relative to the project (waypoint.hcl
+file), app, or pwd of the CLI invocation.
+* **Server snapshot/restore**: you can now use the CLI or API to take and restore online
+snapshots. Restoring snapshot data requires a server restart but the restore operation 
+can be staged online. [GH-870]
+
 IMPROVEMENTS:
+
+* cli/logs: entrypoint logs can now be seen alongside app logs and are colored differently [GH-855]
+* contrib/serverinstall: Automate setup of kind+k8s with metallb [GH-845]
+* core: application config changes (i.e. `waypoint config set`) will now restart running applications [GH-791]
+* core: add more descriptive text to include app name in `waypoint destroy` [GH-807]
+* core: add better error messaging when prefix is missing from the `-raw` flag in `waypoint config set` [GH-815]
+* core: `waypoint.hcl` can be named `waypoint.hcl.json` and use JSON syntax [GH-867]
+* install: Update flags used on server install per-platform [GH-882]
+* install/k8s: support for OpenShift [GH-715]
+* internal/server: Block on instance deployment becoming available [GH-881]
+* server: APIs for Waypoint database snapshot/restore [GH-723]
+* tools: Add tools.go and `make tools` for bootstrapping local dev for build  [GH-863]
+* website: many minor improvements were made in our plugin documentation section for this release
 
 BUG FIXES:
 
+* core: force killed `waypoint exec` sessions won't leave the remote process running [GH-827]
+* cli/token: fix issue where tokens could be cut off on narrow terminals [GH-885]
+
+## 0.1.5 (November 09, 2020)
+
+FEATURES:
+
+IMPROVEMENTS:
+
+* plugin/google-cloud-run: set a default releaser so you don't need a `release` block [GH-756]
+
+BUG FIXES:
+
+* plugin/ecs: do not assign public IP on EC2 cluster [GH-758]
+* plugin/google-cloud-run: less strict image validation to allow projects with slashes [GH-760]
+* plugin/k8s: default releaser should create service with correct namespace [GH-759]
+* entrypoint: be careful to not spawn multiple url agents [GH-752]
+* cli: return error for ErrSentinel types to signal exit codes [GH-768]
 
 ## 0.1.4 (October 26, 2020)
 

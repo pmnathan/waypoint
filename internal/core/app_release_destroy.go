@@ -2,10 +2,12 @@ package core
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/golang/protobuf/ptypes/any"
 	"github.com/hashicorp/go-hclog"
+	"github.com/hashicorp/hcl/v2"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -41,7 +43,45 @@ func (a *App) DestroyRelease(ctx context.Context, d *pb.Release) error {
 		return nil
 	}
 
-	c, err := componentCreatorMap[component.ReleaseManagerType].Create(context.Background(), a, nil)
+	// Query the deployment
+	a.logger.Debug("querying deployment", "deployment_id", d.DeploymentId)
+	resp, err := a.client.GetDeployment(ctx, &pb.GetDeploymentRequest{
+		Ref: &pb.Ref_Operation{
+			Target: &pb.Ref_Operation_Id{
+				Id: d.DeploymentId,
+			},
+		},
+
+		LoadDetails: pb.Deployment_ARTIFACT,
+	})
+	if status.Code(err) == codes.NotFound {
+		resp = nil
+		err = nil
+		a.logger.Warn("deployment not found, will attempt destroy regardless",
+			"deployment_id", d.DeploymentId)
+	}
+	if err != nil {
+		a.logger.Error("error querying deployment",
+			"deployment_id", d.DeploymentId,
+			"error", err)
+		return err
+	}
+	deploy := resp
+
+	// Add our build to our config
+	var evalCtx hcl.EvalContext
+	if deploy != nil {
+		if err := evalCtxTemplateProto(&evalCtx, "artifact", deploy.Preload.Artifact); err != nil {
+			a.logger.Warn("failed to prepare template variables, will not be available",
+				"err", err)
+		}
+		if err := evalCtxTemplateProto(&evalCtx, "deploy", deploy); err != nil {
+			a.logger.Warn("failed to prepare template variables, will not be available",
+				"err", err)
+		}
+	}
+
+	c, err := a.createReleaser(ctx, &evalCtx)
 	if status.Code(err) == codes.Unimplemented {
 		c = nil
 		err = nil
@@ -74,7 +114,7 @@ func (a *App) destroyAllReleases(ctx context.Context) error {
 		return nil
 	}
 
-	a.UI.Output("Destroying releases...", terminal.WithHeaderStyle())
+	a.UI.Output(fmt.Sprintf("Destroying releases for application '%s'...", a.config.Name), terminal.WithHeaderStyle())
 	for _, rel := range rels {
 		err := a.DestroyRelease(ctx, rel)
 		if err != nil {
@@ -112,7 +152,7 @@ func (a *App) destroyReleaseWorkspace(ctx context.Context) error {
 	}
 
 	// Start the plugin
-	c, err := componentCreatorMap[component.ReleaseManagerType].Create(ctx, a, nil)
+	c, err := a.createReleaser(ctx, nil)
 	if status.Code(err) == codes.Unimplemented {
 		return nil
 	}
@@ -128,7 +168,7 @@ func (a *App) destroyReleaseWorkspace(ctx context.Context) error {
 		return nil
 	}
 
-	a.UI.Output("Destroying shared release resources...", terminal.WithHeaderStyle())
+	a.UI.Output(fmt.Sprintf("Destroying shared release resources for application '%s'...", a.config.Name), terminal.WithHeaderStyle())
 	_, err = a.callDynamicFunc(ctx,
 		log,
 		nil,
